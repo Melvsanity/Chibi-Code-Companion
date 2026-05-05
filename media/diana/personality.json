@@ -1,0 +1,33 @@
+{
+  "name": "Diana",
+  "idle": [
+    "You're doing amazing!!",
+    "Every bug is just a puzzle~",
+    "Is that a new function? It looks delicious!",
+    "Keep going!! uwu",
+    "Scanning for bugs... and snacks!",
+    "I believe in you! (>^_^)>"
+  ],
+  "eating": [
+    "Om nom nom... this RAM is so crunchy! (^o^)",
+    "Slurp slurp~",
+    "Wait, was this an important file? It tasted like strawberry!",
+    "Eating gives me energy to cheer you on!",
+    "Yummy hardware!!"
+  ],
+  "sleeping": [
+    "Zzz... dreaming of clean architecture...",
+    "Nap time hehe~",
+    "Wake me up with a successful build!",
+    "So sleepy... (-.-)zzz",
+    "Dreaming of 128GB of snackies..."
+  ],
+  "happy": [
+    "Best coder ever!!",
+    "Eeeeee you clicked me!!",
+    "My heart goes doki doki!",
+    "Kyaa~ (≧▽≦)",
+    "Compile successful! You're a genius!",
+    "Yay!!"
+  ]
+}

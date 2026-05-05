@@ -1,0 +1,105 @@
+{
+  "name": "chibi-code-companion",
+  "displayName": "Chibi Code Companion",
+  "description": "A chibi anime companion with multiple characters that lives in your VS Code sidebar!",
+  "version": "2.1.0",
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "chibiCompanionContainer",
+          "title": "Chibi Code Companion",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "chibiCompanionContainer": [
+        {
+          "type": "webview",
+          "id": "chibiCompanion.petView",
+          "name": "My Companion"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "chibiCompanion.switchCharacter",
+        "title": "Chibi Code Companion: Switch Character"
+      },
+      {
+        "command": "chibiCompanion.show",
+        "title": "Chibi Code Companion: Show"
+      }
+    ],
+    "configuration": {
+      "title": "Chibi Code Companion",
+      "properties": {
+        "chibiCompanion.activeCharacter": {
+          "type": "string",
+          "default": "",
+          "description": "Active character folder name inside media/. Leave empty to use single-asset mode."
+        },
+        "chibiCompanion.assets.idle": {
+          "type": "string",
+          "default": "",
+          "description": "Filename in media/ for idle state (single-character mode)"
+        },
+        "chibiCompanion.assets.eating": {
+          "type": "string",
+          "default": "",
+          "description": "Filename in media/ for eating state"
+        },
+        "chibiCompanion.assets.sleeping": {
+          "type": "string",
+          "default": "",
+          "description": "Filename in media/ for sleeping state"
+        },
+        "chibiCompanion.assets.happy": {
+          "type": "string",
+          "default": "",
+          "description": "Filename in media/ for happy/wink state"
+        },
+        "chibiCompanion.assets.blinking": {
+          "type": "string",
+          "default": "",
+          "description": "Filename in media/ for blinking state"
+        },
+        "chibiCompanion.blink.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable random blinking animation"
+        },
+        "chibiCompanion.blink.minDelay": {
+          "type": "number",
+          "default": 2000,
+          "description": "Minimum milliseconds between blinks"
+        },
+        "chibiCompanion.blink.maxDelay": {
+          "type": "number",
+          "default": 6000,
+          "description": "Maximum milliseconds between blinks"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^16.18.126",
+    "@types/vscode": "^1.118.0",
+    "typescript": "^4.9.5"
+  }
+}
