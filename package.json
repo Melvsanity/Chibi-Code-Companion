@@ -6,7 +6,7 @@
   "license": "MIT",
   "icon": "media/icon.png",
   "engines": {
-    "vscode": "^1.74.0"
+    "vscode": "^1.118.0"
   },
   "categories": [
     "Other"
