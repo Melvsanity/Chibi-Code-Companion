@@ -30,7 +30,7 @@ Reacts to your coding activity, supports multiple characters, and keeps you comp
 | VS Code Event | Animation | Overlay |
 |---------------|-----------|---------|
 | Typing / cursor move | Wakes up from sleep | — |
-| **Save a file** | Eating animation | 🍜 Ramen bowl + steam |
+| **Save a file** | Eating animation | Eating RAM |
 | **60s of inactivity** | Sleeping animation | 💤 Floating Z's |
 | **Click the pet** | Happy animation | 💕 Floating hearts |
 | **Idle** | Gentle bounce + random blink | — |

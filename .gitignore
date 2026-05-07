@@ -7,7 +7,6 @@ yarn-error.log*
 # Build output
 out/
 dist/
-*.vsix
 
 # OS
 .DS_Store
@@ -15,6 +14,7 @@ Thumbs.db
 
 # VS Code
 .vscode/*
+!.vscode/launch.json
 !.vscode/extensions.json
 
 # Environment
