@@ -25,11 +25,26 @@ const EATING_MS     = 4_000;
 const HAPPY_MS      = 3_000;
 
 const DEFAULT_PERSONALITY: Personality = {
-  name:     'Mochi',
+  name:     'Unknown',
   idle:     ['( ^-^ )', 'Watching you code~', 'Meow!', 'uwu', 'Keep going!'],
   eating:   ['Slurp! Ramen!', 'Yummy!', 'Om nom nom~'],
   sleeping: ['Zzz...', 'Nap time~', '...zz'],
   happy:    ['Yay!! ^_^', 'I love you!', 'You clicked me!'],
+};
+
+// Shown when no character images are found
+const ERROR_PERSONALITY: Personality = {
+  name:     '???',
+  idle:     [
+    'No images found!',
+    'Add images to media/yourcharacter/',
+    'Where is everyone...?',
+    'Hello? Anyone there?',
+    'Please add a character!',
+  ],
+  eating:   ['I can\'t eat without a character!', 'No images... no ramen?'],
+  sleeping: ['Zzz... still no images...', 'Sleeping until you add images'],
+  happy:    ['At least you clicked me!', 'Add images please! uwu'],
 };
 
 let currentState: PetState = 'idle';
@@ -60,7 +75,7 @@ export function activate(context: vscode.ExtensionContext) {
       }));
       const pick = await vscode.window.showQuickPick(items, {
         placeHolder: 'Select a character',
-        title: 'Chibi Pet Switch Character',
+        title: 'Chibi Code Companion: Switch Character',
       });
       if (!pick) { return; }
       await switchToCharacter(context, pick.label);
@@ -92,7 +107,7 @@ export function activate(context: vscode.ExtensionContext) {
       if (currentState === 'sleeping') { setState('idle'); }
     }),
     vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('chibiPet')) { provider?.refresh(); }
+      if (e.affectsConfiguration('chibiCompanion')) { provider?.refresh(); }
     }),
   );
 
@@ -164,7 +179,7 @@ function resolveCharacterAssets(
 }
 
 function resolveLegacyAssets(context: vscode.ExtensionContext, webview: vscode.Webview): CharacterAssets {
-  const c = vscode.workspace.getConfiguration('chibiPet');
+  const c = vscode.workspace.getConfiguration('chibiCompanion');
   const resolve = (filename: string): string | null => {
     if (!filename) { return null; }
     const p = vscode.Uri.joinPath(context.extensionUri, 'media', filename);
@@ -180,15 +195,26 @@ function resolveLegacyAssets(context: vscode.ExtensionContext, webview: vscode.W
   };
 }
 
+function resolveErrorImage(context: vscode.ExtensionContext, webview: vscode.Webview): string | null {
+  const exts = ['.png', '.gif', '.jpg', '.jpeg', '.svg', '.webp'];
+  for (const ext of exts) {
+    const p = vscode.Uri.joinPath(context.extensionUri, 'media', 'error' + ext);
+    if (fs.existsSync(p.fsPath)) {
+      return webview.asWebviewUri(p).toString();
+    }
+  }
+  return null;
+}
+
 async function switchToCharacter(context: vscode.ExtensionContext, folderName: string) {
   await context.globalState.update('activeCharacter', folderName);
-  await vscode.workspace.getConfiguration('chibiPet').update(
+  await vscode.workspace.getConfiguration('chibiCompanion').update(
     'activeCharacter', folderName, vscode.ConfigurationTarget.Global,
   );
   currentState = 'idle';
   provider?.refresh();
   const personality = loadPersonality(context, folderName);
-  vscode.window.showInformationMessage('Chibi Pet: Switched to ' + personality.name + '!');
+  vscode.window.showInformationMessage('Chibi Code Companion: Switched to ' + personality.name + '!');
 }
 
 function setState(next: PetState) {
@@ -241,7 +267,7 @@ class ChibiPetViewProvider implements vscode.WebviewViewProvider {
   }
 
   private buildHtml(webview: vscode.Webview): string {
-    const cfg        = vscode.workspace.getConfiguration('chibiPet');
+    const cfg        = vscode.workspace.getConfiguration('chibiCompanion');
     const activeChar = cfg.get<string>('activeCharacter', '') || this.ctx.globalState.get<string>('activeCharacter', '');
     const characters = getCharacterList(this.ctx);
 
@@ -260,17 +286,23 @@ class ChibiPetViewProvider implements vscode.WebviewViewProvider {
       personality = DEFAULT_PERSONALITY;
     }
 
-    const hasAsset     = Object.values(assets).some(Boolean);
+    const hasAsset    = Object.values(assets).some(Boolean);
+    const errorImgUri = resolveErrorImage(this.ctx, webview);
+
+    // If no character images at all, use error personality
+    const activePersonality = hasAsset ? personality : ERROR_PERSONALITY;
+
     const blinkEnabled = cfg.get<boolean>('blink.enabled', true);
     const blinkMin     = cfg.get<number>('blink.minDelay', 2000);
     const blinkMax     = cfg.get<number>('blink.maxDelay', 6000);
 
     const assetJson       = JSON.stringify(assets);
     const hasJson         = JSON.stringify(hasAsset);
-    const personalityJson = JSON.stringify(personality);
+    const personalityJson = JSON.stringify(activePersonality);
     const activeCharJson  = JSON.stringify(activeChar || (characters[0]?.folderName ?? ''));
     const charactersJson  = JSON.stringify(characters.map(c => ({ folder: c.folderName, name: c.displayName })));
     const blinkJson       = JSON.stringify({ enabled: blinkEnabled, min: blinkMin, max: blinkMax });
+    const errorImgJson    = JSON.stringify(errorImgUri);
 
     return [
       '<!DOCTYPE html>',
@@ -281,7 +313,7 @@ class ChibiPetViewProvider implements vscode.WebviewViewProvider {
       '</head><body>',
       this.body(),
       '<script>',
-      this.script(assetJson, hasJson, personalityJson, activeCharJson, charactersJson, blinkJson),
+      this.script(assetJson, hasJson, personalityJson, activeCharJson, charactersJson, blinkJson, errorImgJson),
       '<\/script>',
       '</body></html>',
     ].join('\n');
@@ -356,52 +388,11 @@ body::before {
   filter: drop-shadow(0 6px 16px rgba(180,100,220,0.25));
   display: flex; align-items: center; justify-content: center;
 }
-.pet-img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; display: none; }
-.css-pet { width: 100%; height: 100%; position: relative; }
-.cat-body {
-  position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
-  width: 62%; height: 52%; background: linear-gradient(135deg, #ffb8c8, #ff8faa); border-radius: 50% 50% 40% 40%;
+.pet-img {
+  width: 100%; height: 100%;
+  object-fit: contain; image-rendering: pixelated; display: none;
 }
-.cat-tummy {
-  position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
-  width: 52%; height: 58%; background: #fff0f3; border-radius: 50%;
-}
-.cat-head {
-  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  width: 66%; height: 58%; background: linear-gradient(135deg, #ffb8c8, #ff8faa); border-radius: 50% 50% 45% 45%;
-}
-.cat-ear-l,.cat-ear-r {
-  position: absolute; top: -12px; width: 0; height: 0;
-  border-left: 11px solid transparent; border-right: 11px solid transparent; border-bottom: 22px solid #ff8faa;
-}
-.cat-ear-l { left: 4px; transform: rotate(-15deg); }
-.cat-ear-r { right: 4px; transform: rotate(15deg); }
-.cat-ear-l::after,.cat-ear-r::after {
-  content: ''; position: absolute; top: 5px; left: -6px; width: 0; height: 0;
-  border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 13px solid #ffccd8;
-}
-.cat-eyes { position: absolute; top: 30%; left: 50%; transform: translateX(-50%); display: flex; gap: 16px; }
-.eye { width: 11px; height: 11px; background: #2c1a2e; border-radius: 50%; position: relative; transition: all 0.3s; }
-.eye::after { content: ''; position: absolute; top: 1px; right: 1px; width: 3px; height: 3px; background: white; border-radius: 50%; }
-.state-sleeping .eye { height: 2px; border-radius: 2px; margin-top: 5px; }
-.state-sleeping .eye::after { display: none; }
-.cat-blush-l,.cat-blush-r { position: absolute; top: 47%; width: 13px; height: 8px; background: rgba(255,100,120,0.4); border-radius: 50%; }
-.cat-blush-l { left: 5px; } .cat-blush-r { right: 5px; }
-.cat-nose { position: absolute; top: 55%; left: 50%; transform: translateX(-50%); width: 6px; height: 5px; background: #e05070; border-radius: 50%; }
-.cat-mouth {
-  position: absolute; top: 64%; left: 50%; transform: translateX(-50%);
-  width: 13px; height: 6px; border-bottom: 2px solid #e05070; border-left: 2px solid #e05070;
-  border-right: 2px solid #e05070; border-radius: 0 0 8px 8px; transition: all 0.2s;
-}
-.cat-tail {
-  position: absolute; bottom: 10%; right: -22%; width: 26%; height: 13%;
-  background: #ff8faa; border-radius: 10px; transform-origin: left center; animation: tail-wag 2s ease-in-out infinite;
-}
-.state-sleeping .cat-tail { animation: none; transform: rotate(15deg); }
-.cat-paw-l,.cat-paw-r { position: absolute; bottom: -8%; width: 21%; height: 13%; background: #ffb8c8; border-radius: 50%; }
-.cat-paw-l { left: 8%; } .cat-paw-r { right: 8%; }
-.ramen-bowl { position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); font-size: 28px; opacity: 0; transition: opacity 0.3s; pointer-events: none; }
-.state-eating .ramen-bowl { opacity: 1; }
+
 .zzz { position: absolute; top: -24px; right: -8px; font-size: 13px; font-weight: 800; color: #a0b4ff; opacity: 0; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
 .zzz span { opacity: 0; display: block; animation: zzz-float 3s ease-in-out infinite; }
 .zzz span:nth-child(1){ font-size: 8px; animation-delay: 0s; }
@@ -414,24 +405,14 @@ body::before {
 .state-happy .heart:nth-child(1){ left: -22px; animation-delay: 0s; }
 .state-happy .heart:nth-child(2){ left: 0px;   animation-delay: 0.15s; }
 .state-happy .heart:nth-child(3){ left: 22px;  animation-delay: 0.3s; }
-.steam { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; pointer-events: none; }
-.steam-line { width: 3px; height: 0; background: rgba(255,255,255,0.5); border-radius: 2px; opacity: 0; }
-.state-eating .steam-line { animation: steam-rise 1s ease-out infinite; }
-.state-eating .steam-line:nth-child(1){ animation-delay: 0s; }
-.state-eating .steam-line:nth-child(2){ animation-delay: 0.3s; }
-.state-eating .steam-line:nth-child(3){ animation-delay: 0.6s; }
-.state-eating .cat-head { animation: eating-bob 0.5s ease-in-out infinite; }
 .sleep-tint { position: absolute; inset: 0; background: rgba(80,100,200,0.18); border-radius: 8px; opacity: 0; transition: opacity 0.5s; pointer-events: none; }
 .state-sleeping .sleep-tint { opacity: 1; }
 .state-badge { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.4; margin-bottom: 4px; color: var(--vscode-foreground); }
 .name-tag { font-size: 11px; font-weight: 700; opacity: 0.5; margin-top: 6px; color: var(--vscode-foreground); }
 .hint { font-size: 9px; opacity: 0.25; margin-top: 2px; color: var(--vscode-foreground); }
 @keyframes idle-bounce { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
-@keyframes tail-wag    { 0%,100%{transform:rotate(-10deg)} 50%{transform:rotate(22deg)} }
 @keyframes zzz-float   { 0%{opacity:0;transform:translate(0,0) scale(0.8)} 30%{opacity:1} 100%{opacity:0;transform:translate(4px,-18px) scale(1.2)} }
 @keyframes heart-pop   { 0%{opacity:0;transform:translateY(0) scale(0.5)} 40%{opacity:1;transform:translateY(-14px) scale(1.2)} 100%{opacity:0;transform:translateY(-30px) scale(0.8)} }
-@keyframes steam-rise  { 0%{height:0;opacity:0.7;transform:translateY(0)} 100%{height:18px;opacity:0;transform:translateY(-18px)} }
-@keyframes eating-bob  { 0%,100%{transform:translateX(-50%) rotate(-5deg)} 50%{transform:translateX(-50%) rotate(5deg)} }
 `;
   }
 
@@ -449,36 +430,10 @@ body::before {
       <span class="heart">&#x1F495;</span>
     </div>
     <div class="zzz"><span>z</span><span>z</span><span>Z</span></div>
-    <div class="ramen-bowl">&#x1F35C;</div>
-    <div class="steam">
-      <div class="steam-line"></div>
-      <div class="steam-line"></div>
-      <div class="steam-line"></div>
-    </div>
     <div class="sleep-tint"></div>
     <img id="pet-img" class="pet-img" alt="pet" />
-    <div class="css-pet" id="css-pet">
-      <div class="cat-body">
-        <div class="cat-tummy"></div>
-        <div class="cat-paw-l"></div>
-        <div class="cat-paw-r"></div>
-      </div>
-      <div class="cat-head">
-        <div class="cat-ear-l"></div>
-        <div class="cat-ear-r"></div>
-        <div class="cat-eyes">
-          <div class="eye"></div>
-          <div class="eye"></div>
-        </div>
-        <div class="cat-blush-l"></div>
-        <div class="cat-blush-r"></div>
-        <div class="cat-nose"></div>
-        <div class="cat-mouth" id="cat-mouth"></div>
-      </div>
-      <div class="cat-tail"></div>
-    </div>
   </div>
-  <div class="name-tag" id="name-tag">Mochi</div>
+  <div class="name-tag" id="name-tag">???</div>
   <div class="hint">click to cheer up!</div>
 </div>
 `;
@@ -487,6 +442,7 @@ body::before {
   private script(
     assetJson: string, hasJson: string, personalityJson: string,
     activeCharJson: string, charactersJson: string, blinkJson: string,
+    errorImgJson: string,
   ): string {
     return `
 var vscode      = acquireVsCodeApi();
@@ -496,32 +452,34 @@ var PERSONALITY = ${personalityJson};
 var ACTIVE_CHAR = ${activeCharJson};
 var CHARACTERS  = ${charactersJson};
 var BLINK_CFG   = ${blinkJson};
+var ERROR_IMG   = ${errorImgJson};
 
 var pet     = document.getElementById('pet');
 var petImg  = document.getElementById('pet-img');
-var cssPet  = document.getElementById('css-pet');
 var bubble  = document.getElementById('bubble');
 var badge   = document.getElementById('state-badge');
 var nameTag = document.getElementById('name-tag');
 var charBar = document.getElementById('char-bar');
-var mouth   = document.getElementById('cat-mouth');
 
-var currentState    = 'idle';
-var previousState   = 'idle'; // ← track where we came from
-var bubbleTimer     = null;
-var blinkTimer      = null;
+var currentState     = 'idle';
+var bubbleTimer      = null;
+var blinkTimer       = null;
 var blinkReturnTimer = null;
-var mode = HAS ? 'image' : 'css';
+var mode = HAS ? 'image' : 'error';
 
 function buildCharBar() {
   charBar.innerHTML = '';
-  if (CHARACTERS.length === 0) {
-    var hint = document.createElement('span');
-    hint.className = 'no-chars';
-    hint.textContent = 'Add folders to media/ to add characters';
-    charBar.appendChild(hint);
+
+  // Hide the entire bar if only 0 or 1 character
+  if (CHARACTERS.length <= 1) {
+    charBar.style.display = 'none';
+    // Also remove the top margin from pet-wrap since bar is hidden
+    var petWrap = document.querySelector('.pet-wrap');
+    if (petWrap) { petWrap.style.marginTop = '8px'; }
     return;
   }
+
+  charBar.style.display = 'flex';
   CHARACTERS.forEach(function(ch) {
     var btn = document.createElement('button');
     btn.className = 'char-btn' + (ch.folder === ACTIVE_CHAR ? ' active' : '');
@@ -536,7 +494,7 @@ function buildCharBar() {
 }
 
 function scheduleBlink() {
-  if (!BLINK_CFG.enabled) { return; }
+  if (!BLINK_CFG.enabled || mode !== 'image') { return; }
   clearTimeout(blinkTimer);
   var delay = BLINK_CFG.min + Math.random() * (BLINK_CFG.max - BLINK_CFG.min);
   blinkTimer = setTimeout(function() {
@@ -546,11 +504,9 @@ function scheduleBlink() {
 }
 
 function doBlink() {
-  // go to blinking state — silent, no bubble
   setStateInternal('blinking', false);
   var holdTime = Math.random() < 0.6 ? 120 : 230;
   blinkReturnTimer = setTimeout(function() {
-    // return to idle — also silent, no bubble
     setStateInternal('idle', false);
     scheduleBlink();
   }, holdTime);
@@ -564,25 +520,31 @@ function stopBlink() {
 function setup() {
   nameTag.textContent = PERSONALITY.name;
   buildCharBar();
+  petImg.style.display = 'block';
+
   if (mode === 'image') {
-    cssPet.style.display = 'none';
-    petImg.style.display = 'block';
     setImage('idle');
     scheduleBlink();
+  } else {
+    // error mode — show error.png if it exists, otherwise plain text
+    if (ERROR_IMG) {
+      petImg.src = ERROR_IMG;
+    }
   }
 }
 
 function setImage(state) {
+  if (mode !== 'image') { return; }
   var src = ASSETS[state] || ASSETS['idle'];
   if (!src) { return; }
   if (petImg.src !== src) { petImg.src = src; }
 }
 
-// ── Core state setter — showBubble controls whether dialogue fires ──
 function setStateInternal(state, showBubble) {
   currentState = state;
   pet.className = 'pet state-' + state;
-  badge.textContent = (state === 'blinking' ? 'Idle' : state.charAt(0).toUpperCase() + state.slice(1));
+  var displayName = state === 'blinking' ? 'idle' : state;
+  badge.textContent = displayName.charAt(0).toUpperCase() + displayName.slice(1);
 
   if (mode === 'image') {
     if (state !== 'blinking') { stopBlink(); }
@@ -590,16 +552,9 @@ function setStateInternal(state, showBubble) {
     if (state === 'idle') { scheduleBlink(); }
   }
 
-  if (mouth) {
-    if      (state === 'eating') { mouth.style.height = '8px'; mouth.style.borderRadius = '50%'; }
-    else if (state === 'happy')  { mouth.style.height = '7px'; mouth.style.borderRadius = '0 0 8px 8px'; }
-    else                         { mouth.style.height = '6px'; mouth.style.borderRadius = '0 0 8px 8px'; }
-  }
-
   if (showBubble) { showBubbleText(pick(state)); }
 }
 
-// ── Public setState — always shows bubble (called from VS Code events) ──
 function setState(state) {
   setStateInternal(state, true);
 }
@@ -627,7 +582,6 @@ setup();
 vscode.postMessage({ type: 'ready' });
 setTimeout(function() { showBubbleText(pick('idle')); }, 600);
 
-// Random idle chatter — only fires if pet has been idle for a while, not mid-blink
 setInterval(function() {
   if (currentState === 'idle' && Math.random() < 0.3) {
     showBubbleText(pick('idle'));
