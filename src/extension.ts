@@ -23,8 +23,9 @@ interface CharacterAssets {
 const INACTIVITY_MS  = 60_000;
 const EATING_MS      = 4_000;
 const HAPPY_MS       = 3_000;
-const DEBOUNCE_MS    = 150;   // debounce rapid events
-const CHATTER_MS     = 12_000; // idle chatter interval
+const DEBOUNCE_MS    = 150;
+const CHATTER_MIN_MS = 12_000;
+const CHATTER_MAX_MS = 18_000;
 
 const DEFAULT_PERSONALITY: Personality = {
   name:     'Unknown',
@@ -62,7 +63,7 @@ let provider:         ChibiPetViewProvider | undefined;
 let characterCache:    CharacterInfo[] | null = null;
 let personalityCache:  Map<string, Personality> = new Map();
 let assetCache:        Map<string, CharacterAssets> = new Map();
-let errorImageCache:   string | null | undefined = undefined; // undefined = not checked yet
+let errorImageCache:   string | null | undefined = undefined;
 
 function clearCaches() {
   characterCache   = null;
@@ -113,23 +114,18 @@ export function activate(context: vscode.ExtensionContext) {
   // ── VS Code event listeners ──────────────────────────────────────────────────
 
   context.subscriptions.push(
-    // Save → eating (not debounced — should feel immediate)
     vscode.workspace.onDidSaveTextDocument(() => {
       handleActivity();
-      // Don't interrupt eating already in progress
       if (currentState === 'eating') { return; }
       clearTimeout(eatingTimer);
       setState('eating');
       eatingTimer = setTimeout(() => setState('idle'), EATING_MS);
     }),
 
-    // These three all do the same thing — wake + reset inactivity
-    // Debounced so rapid cursor/typing events don't spam
     vscode.workspace.onDidChangeTextDocument(() => handleActivityDebounced()),
     vscode.window.onDidChangeActiveTextEditor(() => handleActivityDebounced()),
     vscode.window.onDidChangeTextEditorSelection(() => handleActivityDebounced()),
 
-    // Config change — clear caches and rebuild
     vscode.workspace.onDidChangeConfiguration(e => {
       if (e.affectsConfiguration('chibiCompanion')) {
         clearCaches();
@@ -257,7 +253,6 @@ function resolveLegacyAssets(context: vscode.ExtensionContext, webview: vscode.W
 }
 
 function resolveErrorImage(context: vscode.ExtensionContext, webview: vscode.Webview): string | null {
-  // undefined = not checked yet, null = checked and not found
   if (errorImageCache !== undefined) { return errorImageCache; }
   const exts = ['.png', '.gif', '.jpg', '.jpeg', '.svg', '.webp'];
   for (const ext of exts) {
@@ -277,7 +272,6 @@ async function switchToCharacter(context: vscode.ExtensionContext, folderName: s
     'activeCharacter', folderName, vscode.ConfigurationTarget.Global,
   );
   currentState = 'idle';
-  // Only clear asset/personality caches — keep character list
   personalityCache.clear();
   assetCache.clear();
   provider?.rebuild();
@@ -307,8 +301,8 @@ function startInactivityTimer() {
 // ─── Provider ─────────────────────────────────────────────────────────────────
 
 class ChibiPetViewProvider implements vscode.WebviewViewProvider {
-  private view?:    vscode.WebviewView;
-  private builtHtml: string | null = null; // cache the built HTML
+  private view?:     vscode.WebviewView;
+  private builtHtml: string | null = null;
 
   constructor(private readonly ctx: vscode.ExtensionContext) {}
 
@@ -319,7 +313,6 @@ class ChibiPetViewProvider implements vscode.WebviewViewProvider {
       localResourceRoots: [vscode.Uri.joinPath(this.ctx.extensionUri, 'media')],
     };
 
-    // Build HTML once and cache it
     this.builtHtml = this.buildHtml(webviewView.webview);
     webviewView.webview.html = this.builtHtml;
 
@@ -338,7 +331,6 @@ class ChibiPetViewProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage({ type: 'setState', state });
   }
 
-  // Full rebuild — only called on char switch or config change
   rebuild() {
     this.builtHtml = null;
     if (this.view) {
@@ -348,7 +340,6 @@ class ChibiPetViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  // Legacy alias
   refresh() { this.rebuild(); }
 
   private buildHtml(webview: vscode.Webview): string {
@@ -375,8 +366,8 @@ class ChibiPetViewProvider implements vscode.WebviewViewProvider {
     const isAnimated = assets.idle?.toLowerCase().includes('.gif') ?? false;
     const shadowJson = JSON.stringify(!isAnimated);
 
-    const hasAsset         = Object.values(assets).some(Boolean);
-    const errorImgUri      = resolveErrorImage(this.ctx, webview);
+    const hasAsset          = Object.values(assets).some(Boolean);
+    const errorImgUri       = resolveErrorImage(this.ctx, webview);
     const activePersonality = hasAsset ? personality : ERROR_PERSONALITY;
 
     const blinkEnabled = cfg.get<boolean>('blink.enabled', true);
@@ -554,7 +545,7 @@ var currentState     = 'idle';
 var bubbleTimer      = null;
 var blinkTimer       = null;
 var blinkReturnTimer = null;
-var chatterTimer     = null;
+var chatterTimer     = null;   // now a setTimeout handle, not setInterval
 var mode = HAS ? 'image' : 'error';
 
 // ── Build character switcher ──────────────────────────────────────────────────
@@ -566,7 +557,6 @@ function buildCharBar() {
     return;
   }
   charBar.style.display = 'flex';
-  // Use fragment for single DOM write
   var frag = document.createDocumentFragment();
   CHARACTERS.forEach(function(ch) {
     var btn = document.createElement('button');
@@ -607,14 +597,18 @@ function stopBlink() {
   clearTimeout(blinkReturnTimer);
 }
 
-// ── Idle chatter — use setInterval instead of recursive setTimeout ────────────
-function startChatter() {
-  clearInterval(chatterTimer);
-  chatterTimer = setInterval(function() {
-    if (currentState === 'idle' && Math.random() < 0.3) {
+// ── Idle chatter — randomized interval, always fires ─────────────────────────
+// Old approach: fixed 12s setInterval + 30% gate = ~40s average wait
+// New approach: random 9–15s setTimeout, fires every time when idle
+function scheduleChatter() {
+  clearTimeout(chatterTimer);
+  var delay = ${CHATTER_MIN_MS} + Math.random() * (${CHATTER_MAX_MS} - ${CHATTER_MIN_MS});
+  chatterTimer = setTimeout(function() {
+    if (currentState === 'idle') {
       showBubbleText(pick('idle'));
     }
-  }, ${CHATTER_MS});
+    scheduleChatter(); // always reschedule, even if she was busy
+  }, delay);
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -638,13 +632,13 @@ function setup() {
     petImg.src = ERROR_IMG;
   }
 
-  startChatter();
+  scheduleChatter(); // ← was startChatter()
 }
 
 function setImage(state) {
   if (mode !== 'image') { return; }
   var src = ASSETS[state] || ASSETS['idle'];
-  if (!src || petImg.src === src) { return; } // skip if same image
+  if (!src || petImg.src === src) { return; }
   petImg.src = src;
 }
 

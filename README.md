@@ -5,11 +5,27 @@
 **A chibi anime companion that lives in your VS Code sidebar.**  
 Reacts to your coding activity, supports multiple characters, and keeps you company while you work.
 
-![Version](https://img.shields.io/badge/version-1.1.0-pink?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.1.1-pink?style=flat-square)
 ![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.118.0-blue?style=flat-square&logo=visualstudiocode)
 ![License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
 
 </div>
+
+---
+
+## Preview
+
+<p align="center">
+  <img src="media/preview.png" height="500" alt="Chibi Code Companion Preview"/>
+</p>
+
+---
+
+## Why?
+
+Coding can feel lonely sometimes.
+
+Chibi Code Companion adds a small reactive character to your VS Code sidebar that responds to your activity and keeps your workspace feeling a little more alive.
 
 ---
 
