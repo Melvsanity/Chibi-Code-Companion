@@ -20,19 +20,20 @@ interface CharacterAssets {
   blinking: string | null;
 }
 
-const INACTIVITY_MS = 60_000;
-const EATING_MS     = 4_000;
-const HAPPY_MS      = 3_000;
+const INACTIVITY_MS  = 60_000;
+const EATING_MS      = 4_000;
+const HAPPY_MS       = 3_000;
+const DEBOUNCE_MS    = 150;   // debounce rapid events
+const CHATTER_MS     = 12_000; // idle chatter interval
 
 const DEFAULT_PERSONALITY: Personality = {
   name:     'Unknown',
-  idle:     ['( ^-^ )', 'Watching you code~', 'Meow!', 'uwu', 'Keep going!'],
-  eating:   ['Slurp! Ramen!', 'Yummy!', 'Om nom nom~'],
-  sleeping: ['Zzz...', 'Nap time~', '...zz'],
-  happy:    ['Yay!! ^_^', 'I love you!', 'You clicked me!'],
+  idle:     ['( ^-^ )', 'Watching you code~', 'Keep going!', 'uwu'],
+  eating:   ['Yummy!', 'Om nom nom~'],
+  sleeping: ['Zzz...', 'Nap time~'],
+  happy:    ['Yay!!', 'You clicked me!'],
 };
 
-// Shown when no character images are found
 const ERROR_PERSONALITY: Personality = {
   name:     '???',
   idle:     [
@@ -42,14 +43,35 @@ const ERROR_PERSONALITY: Personality = {
     'Did you forget to add images?',
     'Please add a character!',
   ],
-  eating:   ['I can\'t eat without a character!', 'No images... no ramen?'],
+  eating:   ["I can't eat without a character!", 'No images... no ramen?'],
   sleeping: ['Zzz... still no images...', 'Sleeping until you add images'],
   happy:    ['At least you clicked me!', 'Add images please! uwu'],
 };
 
+// ─── State ────────────────────────────────────────────────────────────────────
+
 let currentState: PetState = 'idle';
-let inactivityTimer: ReturnType<typeof setTimeout> | undefined;
-let provider: ChibiPetViewProvider | undefined;
+let inactivityTimer:  ReturnType<typeof setTimeout> | undefined;
+let debounceTimer:    ReturnType<typeof setTimeout> | undefined;
+let eatingTimer:      ReturnType<typeof setTimeout> | undefined;
+let happyTimer:       ReturnType<typeof setTimeout> | undefined;
+let provider:         ChibiPetViewProvider | undefined;
+
+// ─── Caches ───────────────────────────────────────────────────────────────────
+
+let characterCache:    CharacterInfo[] | null = null;
+let personalityCache:  Map<string, Personality> = new Map();
+let assetCache:        Map<string, CharacterAssets> = new Map();
+let errorImageCache:   string | null | undefined = undefined; // undefined = not checked yet
+
+function clearCaches() {
+  characterCache   = null;
+  personalityCache.clear();
+  assetCache.clear();
+  errorImageCache  = undefined;
+}
+
+// ─── Activate ─────────────────────────────────────────────────────────────────
 
 export function activate(context: vscode.ExtensionContext) {
   provider = new ChibiPetViewProvider(context);
@@ -69,13 +91,13 @@ export function activate(context: vscode.ExtensionContext) {
       }
       const current = context.globalState.get<string>('activeCharacter', '');
       const items = characters.map(c => ({
-        label: c.folderName,
+        label:       c.folderName,
         description: c.displayName !== c.folderName ? c.displayName : '',
-        detail: c.folderName === current ? 'active' : '',
+        detail:      c.folderName === current ? 'active' : '',
       }));
       const pick = await vscode.window.showQuickPick(items, {
         placeHolder: 'Select a character',
-        title: 'Chibi Code Companion: Switch Character',
+        title:       'Chibi Code Companion: Switch Character',
       });
       if (!pick) { return; }
       await switchToCharacter(context, pick.label);
@@ -88,26 +110,31 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
+  // ── VS Code event listeners ──────────────────────────────────────────────────
+
   context.subscriptions.push(
+    // Save → eating (not debounced — should feel immediate)
     vscode.workspace.onDidSaveTextDocument(() => {
-      resetInactivity();
+      handleActivity();
+      // Don't interrupt eating already in progress
+      if (currentState === 'eating') { return; }
+      clearTimeout(eatingTimer);
       setState('eating');
-      setTimeout(() => setState('idle'), EATING_MS);
+      eatingTimer = setTimeout(() => setState('idle'), EATING_MS);
     }),
-    vscode.workspace.onDidChangeTextDocument(() => {
-      resetInactivity();
-      if (currentState === 'sleeping') { setState('idle'); }
-    }),
-    vscode.window.onDidChangeActiveTextEditor(() => {
-      resetInactivity();
-      if (currentState === 'sleeping') { setState('idle'); }
-    }),
-    vscode.window.onDidChangeTextEditorSelection(() => {
-      resetInactivity();
-      if (currentState === 'sleeping') { setState('idle'); }
-    }),
+
+    // These three all do the same thing — wake + reset inactivity
+    // Debounced so rapid cursor/typing events don't spam
+    vscode.workspace.onDidChangeTextDocument(() => handleActivityDebounced()),
+    vscode.window.onDidChangeActiveTextEditor(() => handleActivityDebounced()),
+    vscode.window.onDidChangeTextEditorSelection(() => handleActivityDebounced()),
+
+    // Config change — clear caches and rebuild
     vscode.workspace.onDidChangeConfiguration(e => {
-      if (e.affectsConfiguration('chibiCompanion')) { provider?.refresh(); }
+      if (e.affectsConfiguration('chibiCompanion')) {
+        clearCaches();
+        provider?.rebuild();
+      }
     }),
   );
 
@@ -116,7 +143,24 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() {
   clearTimeout(inactivityTimer);
+  clearTimeout(debounceTimer);
+  clearTimeout(eatingTimer);
+  clearTimeout(happyTimer);
 }
+
+// ─── Activity helpers ─────────────────────────────────────────────────────────
+
+function handleActivity() {
+  resetInactivity();
+  if (currentState === 'sleeping') { setState('idle'); }
+}
+
+function handleActivityDebounced() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(handleActivity, DEBOUNCE_MS);
+}
+
+// ─── Character helpers ────────────────────────────────────────────────────────
 
 interface CharacterInfo {
   folderName:  string;
@@ -124,35 +168,46 @@ interface CharacterInfo {
 }
 
 function getCharacterList(context: vscode.ExtensionContext): CharacterInfo[] {
+  if (characterCache) { return characterCache; }
   const mediaDir = path.join(context.extensionUri.fsPath, 'media');
   try {
-    return fs.readdirSync(mediaDir)
+    characterCache = fs.readdirSync(mediaDir)
       .filter(f => fs.statSync(path.join(mediaDir, f)).isDirectory())
       .map(folderName => {
         const personality = loadPersonality(context, folderName);
         return { folderName, displayName: personality.name };
       });
   } catch {
-    return [];
+    characterCache = [];
   }
+  return characterCache;
 }
 
 function loadPersonality(context: vscode.ExtensionContext, folderName: string): Personality {
+  if (personalityCache.has(folderName)) {
+    return personalityCache.get(folderName)!;
+  }
+  let result: Personality;
   try {
     const pFile = path.join(context.extensionUri.fsPath, 'media', folderName, 'personality.json');
     if (fs.existsSync(pFile)) {
       const raw    = fs.readFileSync(pFile, 'utf8');
       const parsed = JSON.parse(raw) as Partial<Personality>;
-      return {
+      result = {
         name:     parsed.name     || folderName,
         idle:     parsed.idle     || DEFAULT_PERSONALITY.idle,
         eating:   parsed.eating   || DEFAULT_PERSONALITY.eating,
         sleeping: parsed.sleeping || DEFAULT_PERSONALITY.sleeping,
         happy:    parsed.happy    || DEFAULT_PERSONALITY.happy,
       };
+    } else {
+      result = { ...DEFAULT_PERSONALITY, name: folderName };
     }
-  } catch { /* fall through */ }
-  return { ...DEFAULT_PERSONALITY, name: folderName };
+  } catch {
+    result = { ...DEFAULT_PERSONALITY, name: folderName };
+  }
+  personalityCache.set(folderName, result);
+  return result;
 }
 
 function resolveCharacterAssets(
@@ -160,9 +215,13 @@ function resolveCharacterAssets(
   webview: vscode.Webview,
   folderName: string,
 ): CharacterAssets {
+  const cacheKey = folderName;
+  if (assetCache.has(cacheKey)) { return assetCache.get(cacheKey)!; }
+
   const states: PetState[] = ['idle', 'eating', 'sleeping', 'happy', 'blinking'];
   const exts = ['.gif', '.png', '.svg', '.jpg', '.jpeg', '.webp'];
   const result = {} as CharacterAssets;
+
   for (const state of states) {
     let found: string | null = null;
     for (const ext of exts) {
@@ -175,6 +234,8 @@ function resolveCharacterAssets(
     }
     result[state] = found;
   }
+
+  assetCache.set(cacheKey, result);
   return result;
 }
 
@@ -196,13 +257,17 @@ function resolveLegacyAssets(context: vscode.ExtensionContext, webview: vscode.W
 }
 
 function resolveErrorImage(context: vscode.ExtensionContext, webview: vscode.Webview): string | null {
+  // undefined = not checked yet, null = checked and not found
+  if (errorImageCache !== undefined) { return errorImageCache; }
   const exts = ['.png', '.gif', '.jpg', '.jpeg', '.svg', '.webp'];
   for (const ext of exts) {
     const p = vscode.Uri.joinPath(context.extensionUri, 'media', 'error' + ext);
     if (fs.existsSync(p.fsPath)) {
-      return webview.asWebviewUri(p).toString();
+      errorImageCache = webview.asWebviewUri(p).toString();
+      return errorImageCache;
     }
   }
+  errorImageCache = null;
   return null;
 }
 
@@ -212,10 +277,15 @@ async function switchToCharacter(context: vscode.ExtensionContext, folderName: s
     'activeCharacter', folderName, vscode.ConfigurationTarget.Global,
   );
   currentState = 'idle';
-  provider?.refresh();
+  // Only clear asset/personality caches — keep character list
+  personalityCache.clear();
+  assetCache.clear();
+  provider?.rebuild();
   const personality = loadPersonality(context, folderName);
   vscode.window.showInformationMessage('Chibi Code Companion: Switched to ' + personality.name + '!');
 }
+
+// ─── State helpers ────────────────────────────────────────────────────────────
 
 function setState(next: PetState) {
   if (currentState === next) { return; }
@@ -234,8 +304,12 @@ function startInactivityTimer() {
   }, INACTIVITY_MS);
 }
 
+// ─── Provider ─────────────────────────────────────────────────────────────────
+
 class ChibiPetViewProvider implements vscode.WebviewViewProvider {
-  private view?: vscode.WebviewView;
+  private view?:    vscode.WebviewView;
+  private builtHtml: string | null = null; // cache the built HTML
+
   constructor(private readonly ctx: vscode.ExtensionContext) {}
 
   resolveWebviewView(webviewView: vscode.WebviewView) {
@@ -244,11 +318,16 @@ class ChibiPetViewProvider implements vscode.WebviewViewProvider {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.ctx.extensionUri, 'media')],
     };
-    webviewView.webview.html = this.buildHtml(webviewView.webview);
+
+    // Build HTML once and cache it
+    this.builtHtml = this.buildHtml(webviewView.webview);
+    webviewView.webview.html = this.builtHtml;
+
     webviewView.webview.onDidReceiveMessage(msg => {
       if (msg.type === 'petClick') {
         setState('happy');
-        setTimeout(() => setState('idle'), HAPPY_MS);
+        clearTimeout(happyTimer);
+        happyTimer = setTimeout(() => setState('idle'), HAPPY_MS);
       }
       if (msg.type === 'ready')           { this.postState(currentState); }
       if (msg.type === 'switchCharacter') { switchToCharacter(this.ctx, msg.character as string); }
@@ -259,19 +338,26 @@ class ChibiPetViewProvider implements vscode.WebviewViewProvider {
     this.view?.webview.postMessage({ type: 'setState', state });
   }
 
-  refresh() {
+  // Full rebuild — only called on char switch or config change
+  rebuild() {
+    this.builtHtml = null;
     if (this.view) {
-      this.view.webview.html = this.buildHtml(this.view.webview);
+      this.builtHtml = this.buildHtml(this.view.webview);
+      this.view.webview.html = this.builtHtml;
       setTimeout(() => this.postState(currentState), 150);
     }
   }
 
+  // Legacy alias
+  refresh() { this.rebuild(); }
+
   private buildHtml(webview: vscode.Webview): string {
     const cfg        = vscode.workspace.getConfiguration('chibiCompanion');
-    const activeChar = cfg.get<string>('activeCharacter', '') || this.ctx.globalState.get<string>('activeCharacter', '');
+    const activeChar = cfg.get<string>('activeCharacter', '')
+      || this.ctx.globalState.get<string>('activeCharacter', '');
     const characters = getCharacterList(this.ctx);
 
-    let assets: CharacterAssets;
+    let assets:      CharacterAssets;
     let personality: Personality;
 
     if (activeChar && characters.some(c => c.folderName === activeChar)) {
@@ -286,10 +372,11 @@ class ChibiPetViewProvider implements vscode.WebviewViewProvider {
       personality = DEFAULT_PERSONALITY;
     }
 
-    const hasAsset    = Object.values(assets).some(Boolean);
-    const errorImgUri = resolveErrorImage(this.ctx, webview);
+    const isAnimated = assets.idle?.toLowerCase().includes('.gif') ?? false;
+    const shadowJson = JSON.stringify(!isAnimated);
 
-    // If no character images at all, use error personality
+    const hasAsset         = Object.values(assets).some(Boolean);
+    const errorImgUri      = resolveErrorImage(this.ctx, webview);
     const activePersonality = hasAsset ? personality : ERROR_PERSONALITY;
 
     const blinkEnabled = cfg.get<boolean>('blink.enabled', true);
@@ -313,7 +400,7 @@ class ChibiPetViewProvider implements vscode.WebviewViewProvider {
       '</head><body>',
       this.body(),
       '<script>',
-      this.script(assetJson, hasJson, personalityJson, activeCharJson, charactersJson, blinkJson, errorImgJson),
+      this.script(assetJson, hasJson, personalityJson, activeCharJson, charactersJson, blinkJson, errorImgJson, shadowJson),
       '<\/script>',
       '</body></html>',
     ].join('\n');
@@ -385,17 +472,16 @@ body::before {
 .pet {
   width: 150px; height: 150px; position: relative;
   animation: idle-bounce 2.4s ease-in-out infinite;
-  filter: drop-shadow(0 6px 16px rgba(180,100,220,0.25));
   display: flex; align-items: center; justify-content: center;
 }
-.pet-img {
-  width: 100%; height: 100%;
-  object-fit: contain; image-rendering: pixelated; display: none;
+.pet-img { width: 100%; height: 100%; object-fit: contain; image-rendering: pixelated; display: none; }
+.zzz {
+  position: absolute; top: -24px; right: -8px; font-size: 13px; font-weight: 800;
+  color: #a0b4ff; opacity: 0; display: flex; flex-direction: column;
+  align-items: flex-end; pointer-events: none;
 }
-
-.zzz { position: absolute; top: -24px; right: -8px; font-size: 13px; font-weight: 800; color: #a0b4ff; opacity: 0; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
 .zzz span { opacity: 0; display: block; animation: zzz-float 3s ease-in-out infinite; }
-.zzz span:nth-child(1){ font-size: 8px; animation-delay: 0s; }
+.zzz span:nth-child(1){ font-size: 8px;  animation-delay: 0s; }
 .zzz span:nth-child(2){ font-size: 10px; animation-delay: 0.5s; }
 .zzz span:nth-child(3){ font-size: 13px; animation-delay: 1s; }
 .state-sleeping .zzz { opacity: 1; }
@@ -405,7 +491,10 @@ body::before {
 .state-happy .heart:nth-child(1){ left: -22px; animation-delay: 0s; }
 .state-happy .heart:nth-child(2){ left: 0px;   animation-delay: 0.15s; }
 .state-happy .heart:nth-child(3){ left: 22px;  animation-delay: 0.3s; }
-.sleep-tint { position: absolute; inset: 0; background: rgba(80,100,200,0.18); border-radius: 8px; opacity: 0; transition: opacity 0.5s; pointer-events: none; }
+.sleep-tint {
+  position: absolute; inset: 0; background: rgba(80,100,200,0.18);
+  border-radius: 8px; opacity: 0; transition: opacity 0.5s; pointer-events: none;
+}
 .state-sleeping .sleep-tint { opacity: 1; }
 .state-badge { font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.4; margin-bottom: 4px; color: var(--vscode-foreground); }
 .name-tag { font-size: 11px; font-weight: 700; opacity: 0.5; margin-top: 6px; color: var(--vscode-foreground); }
@@ -442,7 +531,7 @@ body::before {
   private script(
     assetJson: string, hasJson: string, personalityJson: string,
     activeCharJson: string, charactersJson: string, blinkJson: string,
-    errorImgJson: string,
+    errorImgJson: string, shadowJson: string,
   ): string {
     return `
 var vscode      = acquireVsCodeApi();
@@ -465,21 +554,20 @@ var currentState     = 'idle';
 var bubbleTimer      = null;
 var blinkTimer       = null;
 var blinkReturnTimer = null;
+var chatterTimer     = null;
 var mode = HAS ? 'image' : 'error';
 
+// ── Build character switcher ──────────────────────────────────────────────────
 function buildCharBar() {
-  charBar.innerHTML = '';
-
-  // Hide the entire bar if only 0 or 1 character
   if (CHARACTERS.length <= 1) {
     charBar.style.display = 'none';
-    // Also remove the top margin from pet-wrap since bar is hidden
     var petWrap = document.querySelector('.pet-wrap');
     if (petWrap) { petWrap.style.marginTop = '8px'; }
     return;
   }
-
   charBar.style.display = 'flex';
+  // Use fragment for single DOM write
+  var frag = document.createDocumentFragment();
   CHARACTERS.forEach(function(ch) {
     var btn = document.createElement('button');
     btn.className = 'char-btn' + (ch.folder === ACTIVE_CHAR ? ' active' : '');
@@ -489,10 +577,12 @@ function buildCharBar() {
       e.stopPropagation();
       vscode.postMessage({ type: 'switchCharacter', character: ch.folder });
     };
-    charBar.appendChild(btn);
+    frag.appendChild(btn);
   });
+  charBar.appendChild(frag);
 }
 
+// ── Blink system ──────────────────────────────────────────────────────────────
 function scheduleBlink() {
   if (!BLINK_CFG.enabled || mode !== 'image') { return; }
   clearTimeout(blinkTimer);
@@ -517,7 +607,26 @@ function stopBlink() {
   clearTimeout(blinkReturnTimer);
 }
 
+// ── Idle chatter — use setInterval instead of recursive setTimeout ────────────
+function startChatter() {
+  clearInterval(chatterTimer);
+  chatterTimer = setInterval(function() {
+    if (currentState === 'idle' && Math.random() < 0.3) {
+      showBubbleText(pick('idle'));
+    }
+  }, ${CHATTER_MS});
+}
+
+// ── Setup ─────────────────────────────────────────────────────────────────────
+var USE_SHADOW = ${shadowJson};
+
 function setup() {
+  if (USE_SHADOW) {
+    pet.style.filter = 'drop-shadow(0 6px 16px rgba(180,100,220,0.25))';
+  } else {
+    pet.style.filter = 'none';
+  }
+
   nameTag.textContent = PERSONALITY.name;
   buildCharBar();
   petImg.style.display = 'block';
@@ -525,21 +634,21 @@ function setup() {
   if (mode === 'image') {
     setImage('idle');
     scheduleBlink();
-  } else {
-    // error mode — show error.png if it exists, otherwise plain text
-    if (ERROR_IMG) {
-      petImg.src = ERROR_IMG;
-    }
+  } else if (ERROR_IMG) {
+    petImg.src = ERROR_IMG;
   }
+
+  startChatter();
 }
 
 function setImage(state) {
   if (mode !== 'image') { return; }
   var src = ASSETS[state] || ASSETS['idle'];
-  if (!src) { return; }
-  if (petImg.src !== src) { petImg.src = src; }
+  if (!src || petImg.src === src) { return; } // skip if same image
+  petImg.src = src;
 }
 
+// ── State machine ─────────────────────────────────────────────────────────────
 function setStateInternal(state, showBubble) {
   currentState = state;
   pet.className = 'pet state-' + state;
@@ -559,6 +668,7 @@ function setState(state) {
   setStateInternal(state, true);
 }
 
+// ── Dialogue ──────────────────────────────────────────────────────────────────
 function pick(state) {
   var lines = PERSONALITY[state];
   if (!lines || lines.length === 0) { lines = PERSONALITY.idle; }
@@ -581,12 +691,6 @@ window.addEventListener('message', function(e) {
 setup();
 vscode.postMessage({ type: 'ready' });
 setTimeout(function() { showBubbleText(pick('idle')); }, 600);
-
-setInterval(function() {
-  if (currentState === 'idle' && Math.random() < 0.3) {
-    showBubbleText(pick('idle'));
-  }
-}, 12000);
 `;
   }
 }

@@ -91,6 +91,13 @@ media/
 
 > **Tip:** GIFs work too! Use an animated `idle.gif` and your character will loop an animation while you code. You can also use a **sprite sheet** for frame-by-frame animation (advanced setup).
 
+> **Performance Note:** Large GIFs can heavily impact VS Code performance and memory usage.  
+> Recommended:
+> - 128×128 or 256×256 sprites
+> - optimized/compressed GIFs
+> - under 2MB file size when possible
+> - avoid extremely high frame counts or 4K GIFs
+
 ---
 
 ## 💬 personality.json

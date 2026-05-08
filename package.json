@@ -2,7 +2,7 @@
   "name": "chibi-code-companion",
   "displayName": "Chibi Code Companion",
   "description": "A chibi anime companion with multiple characters that lives in your VS Code sidebar!",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icon": "media/icon.png",
   "license": "MIT",
   "repository": {
