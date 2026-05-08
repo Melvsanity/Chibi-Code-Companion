@@ -6,7 +6,7 @@
 Reacts to your coding activity, supports multiple characters, and keeps you company while you work.
 
 ![Version](https://img.shields.io/badge/version-1.0.0-pink?style=flat-square)
-![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.74.0-blue?style=flat-square&logo=visualstudiocode)
+![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.118.0-blue?style=flat-square&logo=visualstudiocode)
 ![License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
 
 </div>
