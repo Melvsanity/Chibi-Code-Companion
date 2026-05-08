@@ -38,8 +38,8 @@ const ERROR_PERSONALITY: Personality = {
   idle:     [
     'No images found!',
     'Add images to media/yourcharacter/',
-    'Where is everyone...?',
-    'Hello? Anyone there?',
+    'ERROR: Character not found',
+    'Did you forget to add images?',
     'Please add a character!',
   ],
   eating:   ['I can\'t eat without a character!', 'No images... no ramen?'],

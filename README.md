@@ -5,7 +5,7 @@
 **A chibi anime companion that lives in your VS Code sidebar.**  
 Reacts to your coding activity, supports multiple characters, and keeps you company while you work.
 
-![Version](https://img.shields.io/badge/version-2.1.0-pink?style=flat-square)
+![Version](https://img.shields.io/badge/version-1.0.0-pink?style=flat-square)
 ![VS Code](https://img.shields.io/badge/VS%20Code-%5E1.74.0-blue?style=flat-square&logo=visualstudiocode)
 ![License](https://img.shields.io/badge/license-MIT-purple?style=flat-square)
 
@@ -30,7 +30,7 @@ Reacts to your coding activity, supports multiple characters, and keeps you comp
 | VS Code Event | Animation | Overlay |
 |---------------|-----------|---------|
 | Typing / cursor move | Wakes up from sleep | — |
-| **Save a file** | Eating animation | Eating RAM |
+| **Save a file** | Eating animation | — |
 | **60s of inactivity** | Sleeping animation | 💤 Floating Z's |
 | **Click the pet** | Happy animation | 💕 Floating hearts |
 | **Idle** | Gentle bounce + random blink | — |
@@ -84,10 +84,12 @@ media/
 │   ├── blinking.png
 │   ├── sleeping.png
 │   └── personality.json
+├── Error.png
+├── icon.png
 └── icon.svg
 ```
 
-> **Tip:** GIFs work too! Use an animated GIF for `idle.gif` and your character will play a looping animation while you code.
+> **Tip:** GIFs work too! Use an animated `idle.gif` and your character will loop an animation while you code. You can also use a **sprite sheet** for frame-by-frame animation (advanced setup).
 
 ---
 
